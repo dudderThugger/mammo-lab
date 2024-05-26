@@ -12,6 +12,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras import metrics
 import time
 import numpy as np
+import pandas as pd
 from keras import backend as K
 
 # Check CUDA functionality, restart kernel to change GPUs
@@ -53,8 +54,8 @@ train_ds = train_ds.prefetch(buffer_size=buffersize)
 val_ds = val_ds.prefetch(buffer_size=buffersize)
 
 ## set up hyperparameters, such as epochs, learning rates, cutoffs.
-epochs = 100
-lr = 0.004
+epochs = 30
+lr = 0.0004
 cutoff = 0.5
 start_time = time.time()
 mirrored_strategy = tf.distribute.MirroredStrategy()
@@ -101,6 +102,11 @@ print("---time taken : %s seconds ---" % (time.time() - start_time))
 # Train model
 history = model.fit(train_ds, validation_data=val_ds, epochs=epochs, callbacks=[cb1])
 print("---time taken : %s seconds ---" % (time.time() - start_time))
+
+# Save training subresults to csv
+history_df = pd.DataFrame(history.history)
+history_df.to_csv("/mnt/d/datasets/INBREAST/results/resnet50_history.csv", index=False)
+
 # Test model
 # Loading checkpoint model
 model.load_weights("/mnt/d/datasets/INBREAST/results/resnet50.h5")
@@ -118,29 +124,20 @@ if not os.path.exists("saved_model_resnet50_simple" + dirName):
     os.makedirs("saved_model_resnet50_simple" + dirName + '/')
 
 model.save('saved_model_resnet50_simple' + dirName + '/resnet152v2_1')
-predicted_probs = np.array([])
-true_classes = np.array([])
-IterationChecker = 0
+predicted_probs = []
+true_classes = []
+
 for images, labels in test_ds:
-    if IterationChecker == 0:
-        predicted_probs = model(images)
-        true_classes = labels.numpy()
+    predicted_prob = model(images).numpy()
+    true_class = labels.numpy()
 
-    IterationChecker += 1
+    predicted_probs.extend(predicted_prob)
+    true_classes.extend(true_class)
 
-    predicted_probs = np.concatenate([predicted_probs,
-                                      model(images)])
-    true_classes = np.concatenate([true_classes, labels.numpy()])
-# Since they are sigmoid outputs, you need to transform them into classes with a threshold, i.e 0.5 here:
-predicted_classes = [1 * (x[0] >= cutoff) for x in predicted_probs]
-# confusion matrix etc:
-conf_matrix = tf.math.confusion_matrix(true_classes, predicted_classes)
-print(conf_matrix)
+probs_dict = {
+    'Probabilities': predicted_probs,
+    'Labels': true_classes
+}
 
-predicted_probs = np.squeeze(predicted_probs)
-predicted_classes = np.array(predicted_classes)
-true_classes = np.squeeze(true_classes)
-summedResults = np.stack((predicted_probs, predicted_classes, true_classes), axis=1)
-##Print out statistics which test files are correctly predicted or not.
-np.savetxt("Resnet50_simple_comp_EMBED.csv", summedResults, delimiter=',',
-           header="predicted_probabilty,predicted_classes,true_classes", comments="")
+probs_df = pd.DataFrame(probs_dict)
+probs_df.to_csv("/mnt/d/datasets/INBREAST/results/resnet50_probs.csv", index=False)
